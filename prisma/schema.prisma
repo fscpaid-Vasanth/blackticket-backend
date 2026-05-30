@@ -1,0 +1,240 @@
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Role {
+  BUYER
+  SELLER
+  ADMIN
+}
+
+enum ListingStatus {
+  PENDING
+  ACTIVE
+  SOLD
+  EXPIRED
+  REJECTED
+}
+
+enum EscrowStatus {
+  PENDING
+  ACTIVE
+  RELEASED
+  FROZEN
+  REFUNDED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  DISPUTED
+  COMPLETED
+  REFUNDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  REFUNDED
+}
+
+enum DisputeStatus {
+  OPEN
+  UNDER_REVIEW
+  RESOLVED_REFUND
+  RESOLVED_RELEASE
+  CLOSED
+}
+
+enum WithdrawStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  DEPOSIT
+  WITHDRAW
+  ESCROW_HOLD
+  ESCROW_RELEASE
+  REFUND
+}
+
+enum AccessAction {
+  VIEW
+  DOWNLOAD
+}
+
+model User {
+  id           String        @id @default(uuid())
+  name         String
+  email        String?       @unique
+  mobile       String        @unique
+  password     String
+  city         String
+  role         Role          @default(BUYER)
+  trustScore   Int           @default(100)
+  status       String        @default("ACTIVE") // ACTIVE, SUSPENDED
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  listings     Listing[]
+  orders       Order[]
+  disputes     Dispute[]
+  notifications Notification[]
+  accessLogs   AccessLog[]
+  wallet       Wallet?
+}
+
+model Listing {
+  id                 String        @id @default(uuid())
+  movieName          String
+  theatre            String
+  city               String
+  showtime           DateTime
+  seats              String[]      // List of seat IDs
+  originalPrice      Float
+  sellingPrice       Float
+  status             ListingStatus @default(PENDING)
+  escrowStatus       EscrowStatus  @default(PENDING)
+  sellerId           String
+  seller             User          @relation(fields: [sellerId], references: [id])
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  ticketUpload       TicketUpload?
+  orders             Order[]
+}
+
+model TicketUpload {
+  id               String        @id @default(uuid())
+  listingId        String        @unique
+  listing          Listing       @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  filePath         String        // AWS S3 key or file path
+  fileSize         Int           // Size in bytes
+  mimeType         String
+  watermarkApplied Boolean       @default(false)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  accessLogs       AccessLog[]
+}
+
+model Order {
+  id         String      @id @default(uuid())
+  listingId  String
+  listing    Listing     @relation(fields: [listingId], references: [id])
+  buyerId    String
+  buyer      User        @relation(fields: [buyerId], references: [id])
+  amount     Float
+  status     OrderStatus @default(PENDING)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+
+  payment    Payment?
+  escrow     Escrow?
+  dispute    Dispute?
+}
+
+model Payment {
+  id                 String        @id @default(uuid())
+  orderId            String        @unique
+  order              Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  razorpayOrderId    String
+  razorpayPaymentId  String?
+  amount             Float
+  status             PaymentStatus @default(PENDING)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+}
+
+model Escrow {
+  id          String       @id @default(uuid())
+  orderId     String       @unique
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  amount      Float
+  status      EscrowStatus @default(PENDING)
+  releaseAt   DateTime     // Showtime + 30 mins
+  releasedAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+model Wallet {
+  id            String             @id @default(uuid())
+  userId        String             @unique
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  balance       Float              @default(0)
+  escrowBalance Float              @default(0)
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+
+  withdrawRequests WithdrawRequest[]
+  transactions     Transaction[]
+}
+
+model WithdrawRequest {
+  id          String         @id @default(uuid())
+  walletId    String
+  wallet      Wallet         @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount      Float
+  bankDetails Json           // IFSC and Account details
+  status      WithdrawStatus @default(PENDING)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+}
+
+model Transaction {
+  id          String          @id @default(uuid())
+  walletId    String
+  wallet      Wallet          @relation(fields: [walletId], references: [id], onDelete: Cascade)
+  amount      Float
+  type        TransactionType
+  description String
+  createdAt   DateTime        @default(now())
+}
+
+model Dispute {
+  id          String        @id @default(uuid())
+  orderId     String        @unique
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  raiserId    String
+  raiser      User          @relation(fields: [raiserId], references: [id])
+  reason      String
+  evidenceUrls String[]
+  status      DisputeStatus @default(OPEN)
+  adminNotes  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+}
+
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  message   String
+  type      String   @default("INFO")
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+model AccessLog {
+  id             String       @id @default(uuid())
+  ticketUploadId String
+  ticketUpload   TicketUpload @relation(fields: [ticketUploadId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User         @relation(fields: [userId], references: [id])
+  deviceInfo     String
+  ipAddress      String
+  actionType     AccessAction
+  createdAt      DateTime     @default(now())
+}
