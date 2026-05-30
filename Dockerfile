@@ -3,16 +3,16 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-# Copy package files first
+# Copy package files
 COPY package*.json ./
 
-# Copy prisma schema BEFORE npm ci so postinstall (prisma generate) can find it
+# Copy prisma schema BEFORE npm ci so postinstall (prisma generate) finds it
 COPY prisma ./prisma
 
-# Install all dependencies (including devDependencies for build)
+# Install ALL dependencies (dev + prod) for the build
 RUN npm ci
 
-# Copy rest of source code
+# Copy source code
 COPY . .
 
 # Compile TypeScript → dist/
@@ -23,17 +23,17 @@ FROM node:20-alpine AS production
 
 WORKDIR /app
 
-COPY package*.json ./
-COPY prisma ./prisma
-
-# Install production dependencies only
-RUN npm ci --omit=dev
-
-# Regenerate Prisma client in production image
-RUN npx prisma generate
-
 # Copy compiled output from builder
 COPY --from=builder /app/dist ./dist
+
+# Copy node_modules (already includes Prisma client generated in builder stage)
+COPY --from=builder /app/node_modules ./node_modules
+
+# Copy prisma schema (needed for runtime introspection)
+COPY --from=builder /app/prisma ./prisma
+
+# Copy package.json (for metadata)
+COPY package*.json ./
 
 EXPOSE 3000
 
